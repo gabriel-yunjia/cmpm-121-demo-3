@@ -1,4 +1,4 @@
-interface Cell {
+export interface Cell {
   x: number;
   y: number;
 }
@@ -16,9 +16,9 @@ export class Board {
   }
 
   getGridCell(x: number, y: number): Cell {
-    const i = x;
-    const j = y;
-    const key = `${i.toFixed(4)}_${j.toFixed(4)}`;
+    const i = Math.round(x * 10000);
+    const j = Math.round(y * 10000);
+    const key = `${i}_${j}`;
     if (this.oldCells.has(key)) {
       return this.oldCells.get(key)!;
     } else {
@@ -36,18 +36,19 @@ export class Board {
 export class Cache {
   coinList: Coins[];
   description: string;
+  cell: Cell;
 
   constructor(cell: Cell) {
     this.description = `${cell.x}_${cell.y}`;
+    this.cell = cell;
     this.coinList = [];
   }
-
-  addCoin(cell: Cell) {
-    const curSerial: number =
+  addCoin() {
+    const Serial: number =
       this.coinList.length > 0
         ? this.coinList[this.coinList.length - 1].serial + 1
         : 0;
-    this.coinList.push({ coord: cell, serial: curSerial });
+    this.coinList.push({ coord: this.cell, serial: Serial });
   }
 
   format(): string[] {
@@ -58,5 +59,13 @@ export class Cache {
       );
     });
     return res;
+  }
+
+  toMomento(): string {
+    return this.description;
+  }
+
+  fromMomento(momento: string) {
+    this.description = momento;
   }
 }

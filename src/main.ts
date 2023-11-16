@@ -3,7 +3,7 @@ import "./style.css";
 import leaflet from "leaflet";
 import luck from "./luck";
 import "./leafletWorkaround";
-import { Board, Cache } from "./board.ts";
+import { Board, Cache, Cell } from "./board.ts";
 
 const MERRILL_CLASSROOM = leaflet.latLng({
   lat: 36.9995,
@@ -45,6 +45,15 @@ leaflet
 
 const currentMap: Board = new Board();
 const cacheList: Map<string, Cache> = new Map<string, Cache>();
+const momentos: Map<Cell, string> = new Map<Cell, string>();
+const cacheMap: Map<Cell, [leaflet.Layer, boolean]> = new Map<
+  Cell,
+  [leaflet.Layer, boolean]
+>();
+const south = document.getElementById("south");
+const north = document.getElementById("north");
+const east = document.getElementById("east");
+const west = document.getElementById("west");
 
 currentMap.getGridCell(MERRILL_CLASSROOM.lat, MERRILL_CLASSROOM.lng);
 
@@ -63,20 +72,20 @@ function makePit(lat: number, lng: number) {
     [lat + TILE_DEGREES, lng + TILE_DEGREES],
   ]);
 
-  const point = currentMap.getGridCell(
-    MERRILL_CLASSROOM.lat + i * TILE_DEGREES,
-    MERRILL_CLASSROOM.lng + j * TILE_DEGREES
-  );
-  const key = `${point.x}_${point.y}`;
+  const point = currentMap.getGridCell(lat, lng);
+
+  const key: string = `${point.x}_${point.y}`;
   cacheList.set(key, new Cache(point));
   const pit = leaflet.rectangle(bounds) as leaflet.Layer;
+  cacheMap.set(point, [pit, true]);
+
+  const value = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
+  for (let iter = 0; iter < value; iter++) {
+    cacheList.get(key)?.addCoin();
+  }
+  momentos.set(point, cacheList.get(key)!.toMomento());
 
   pit.bindPopup(() => {
-    let value = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-    for (let i = 0; i < value; i++) {
-      cacheList.get(key)?.addCoin(point);
-    }
-
     // String maker
     const stringAdd: string[] | undefined = cacheList.get(key)?.format();
     let content = `<div>There is a pit here at "${lat.toFixed(4)}:${lng.toFixed(
@@ -97,6 +106,7 @@ function makePit(lat: number, lng: number) {
     const collects = container.querySelectorAll<HTMLButtonElement>("#collect")!;
     collects.forEach((collect) => {
       collect.addEventListener("click", () => {
+        let value = Number(momentos.get(point));
         if (value > 0) {
           value--;
           points++;
@@ -109,6 +119,7 @@ function makePit(lat: number, lng: number) {
     });
     const deposit = container.querySelector<HTMLButtonElement>("#deposit")!;
     deposit.addEventListener("click", () => {
+      let value = Number(momentos.get(point));
       if (points > 0) {
         value++;
         points--;
@@ -125,9 +136,84 @@ function makePit(lat: number, lng: number) {
 for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
   for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
     if (Math.random() * 100 <= PIT_SPAWN_PROBABILITY) {
-      const lat = MERRILL_CLASSROOM.lat + i * TILE_DEGREES;
-      const lng = MERRILL_CLASSROOM.lng + j * TILE_DEGREES;
+      const lat = playerMarker.getLatLng().lat + i * TILE_DEGREES;
+      const lng = playerMarker.getLatLng().lng + j * TILE_DEGREES;
       makePit(lat, lng);
     }
   }
 }
+
+function updateMap() {
+  console.log("Updating map...");
+
+  const playerCell: Cell = currentMap.getGridCell(
+    playerMarker.getLatLng().lat,
+    playerMarker.getLatLng().lng
+  );
+
+  console.log("Player Cell:", playerCell);
+
+  cacheMap.forEach((cache, cell) => {
+    console.log("Cache Cell:", cell);
+
+    const distanceX = Math.abs(cell.x - playerCell.x);
+    const distanceY = Math.abs(cell.y - playerCell.y);
+
+    console.log("Distance X:", distanceX);
+    console.log("Distance Y:", distanceY);
+
+    const inRangeX = distanceX <= NEIGHBORHOOD_SIZE;
+    const inRangeY = distanceY <= NEIGHBORHOOD_SIZE;
+
+    console.log("In Range X:", inRangeX);
+    console.log("In Range Y:", inRangeY);
+
+    if (!inRangeX || !inRangeY) {
+      // If outside the NEIGHBORHOOD_SIZE in either X or Y direction, remove it
+      if (cache[1]) {
+        cache[0].remove();
+        cache[1] = false;
+      }
+    } else {
+      // If inside the NEIGHBORHOOD_SIZE, add it if it's not already added
+      if (!cache[1]) {
+        cache[0].addTo(map);
+        cache[1] = true;
+      }
+    }
+  });
+
+  console.log("Map updated!");
+}
+
+south?.addEventListener("click", () => {
+  playerMarker.setLatLng({
+    lat: playerMarker.getLatLng().lat - 0.0001,
+    lng: playerMarker.getLatLng().lng,
+  });
+  updateMap();
+});
+
+north?.addEventListener("click", () => {
+  playerMarker.setLatLng({
+    lat: playerMarker.getLatLng().lat + 0.0001,
+    lng: playerMarker.getLatLng().lng,
+  });
+  updateMap();
+});
+
+east?.addEventListener("click", () => {
+  playerMarker.setLatLng({
+    lat: playerMarker.getLatLng().lat,
+    lng: playerMarker.getLatLng().lng + 0.0001,
+  });
+  updateMap();
+});
+
+west?.addEventListener("click", () => {
+  playerMarker.setLatLng({
+    lat: playerMarker.getLatLng().lat,
+    lng: playerMarker.getLatLng().lng - 0.0001,
+  });
+  updateMap();
+});
