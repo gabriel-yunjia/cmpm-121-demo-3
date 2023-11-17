@@ -86,7 +86,6 @@ function makePit(lat: number, lng: number) {
   momentos.set(point, cacheList.get(key)!.toMomento());
 
   pit.bindPopup(() => {
-    // String maker
     const stringAdd: string[] | undefined = cacheList.get(key)?.format();
     let content = `<div>There is a pit here at "${lat.toFixed(4)}:${lng.toFixed(
       4
@@ -169,13 +168,11 @@ function updateMap() {
     console.log("In Range Y:", inRangeY);
 
     if (!inRangeX || !inRangeY) {
-      // If outside the NEIGHBORHOOD_SIZE in either X or Y direction, remove it
       if (cache[1]) {
         cache[0].remove();
         cache[1] = false;
       }
     } else {
-      // If inside the NEIGHBORHOOD_SIZE, add it if it's not already added
       if (!cache[1]) {
         cache[0].addTo(map);
         cache[1] = true;
