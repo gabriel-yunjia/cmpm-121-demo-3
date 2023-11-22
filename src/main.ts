@@ -1,9 +1,9 @@
 import "leaflet/dist/leaflet.css";
 import "./style.css";
-import leaflet from "leaflet";
+import leaflet, { polyline } from "leaflet";
 import luck from "./luck";
 import "./leafletWorkaround";
-import { Board, Cache, Cell } from "./board.ts";
+import { Board, Cache, Cell, Coins } from "./board.ts";
 
 const MERRILL_CLASSROOM = leaflet.latLng({
   lat: 36.9995,
@@ -43,27 +43,57 @@ leaflet
   })
   .addTo(map);
 
+let clearedLocations = new Set();
+let playerCoins: Coins[] = [];
 const currentMap: Board = new Board();
 const cacheList: Map<string, Cache> = new Map<string, Cache>();
-const momentos: Map<Cell, string> = new Map<Cell, string>();
+
 const cacheMap: Map<Cell, [leaflet.Layer, boolean]> = new Map<
   Cell,
   [leaflet.Layer, boolean]
 >();
+let movements: leaflet.LatLng[] = [];
+let polylineArray: leaflet.Polyline[] = [];
 const south = document.getElementById("south");
 const north = document.getElementById("north");
 const east = document.getElementById("east");
 const west = document.getElementById("west");
+const liveSensor = document.getElementById("sensor");
+const reset = document.getElementById("reset");
+
+if (localStorage.getItem("player") == null) {
+  localStorage.setItem("player", ``);
+} else {
+  const playerData = localStorage.getItem(`player`)?.split(",");
+  playerData?.splice(playerData.length - 1, 1);
+  playerData?.forEach((instance) => {
+    const instanceComponents = instance.split("#");
+    playerCoins.push({
+      coord: {
+        x: Number(instanceComponents[0]),
+        y: Number(instanceComponents[1]),
+      },
+      serial: Number(instanceComponents[2]),
+    });
+  });
+}
 
 currentMap.getGridCell(MERRILL_CLASSROOM.lat, MERRILL_CLASSROOM.lng);
-
 const playerMarker = leaflet.marker(MERRILL_CLASSROOM);
+
+movements.push(playerMarker.getLatLng());
+let playerPath = polyline(movements, { color: `blue` });
+polylineArray.push(playerPath);
+
 playerMarker.bindTooltip("That's you!");
 playerMarker.addTo(map);
 
-let points = 0;
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
-statusPanel.innerHTML = "No points yet...";
+if (playerCoins.length > 0) {
+  statusPanel.innerHTML = `${playerCoins.length} points accumulated`;
+} else {
+  statusPanel.innerHTML = "No points yet...";
+}
 
 function makePit(lat: number, lng: number) {
   const { i, j } = CoordinateConverter.convertToGameCell(lat, lng);
@@ -79,20 +109,35 @@ function makePit(lat: number, lng: number) {
   const pit = leaflet.rectangle(bounds) as leaflet.Layer;
   cacheMap.set(point, [pit, true]);
 
-  const value = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-  for (let iter = 0; iter < value; iter++) {
-    cacheList.get(key)?.addCoin();
+  if (localStorage.getItem(JSON.stringify(point)) == null) {
+    const value = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
+    for (let iter = 0; iter < value; iter++) {
+      cacheList.get(key)?.addCoin();
+    }
+    localStorage.setItem(
+      JSON.stringify(point),
+      cacheList.get(key)!.toMomento()
+    );
+  } else {
+    const value = localStorage.getItem(JSON.stringify(point));
+    cacheList.get(key)?.fromMomento(value!);
   }
-  momentos.set(point, cacheList.get(key)!.toMomento());
 
   pit.bindPopup(() => {
+    const cachePoint = JSON.stringify(point);
     const stringAdd: string[] | undefined = cacheList.get(key)?.format();
     let content = `<div>There is a pit here at "${lat.toFixed(4)}:${lng.toFixed(
       4
-    )}". It has value <span id="value">${value}</span>.</div>
+    )}". It has value <span id="value">${
+      localStorage.getItem(cachePoint)!.split(",").length
+    }</span>.</div>
                   <p>Available Cache:</p>
                   <div id="scrollableContainer" style="max-height: 150px; overflow-y: auto;">`;
-    for (let i = 0; i < value; i++) {
+    for (
+      let i = 0;
+      i < localStorage.getItem(cachePoint)!.split(",").length;
+      i++
+    ) {
       if (stringAdd) {
         content += `<p>${stringAdd[i]}   <button id="collect">collect</button></p>`;
       }
@@ -103,48 +148,94 @@ function makePit(lat: number, lng: number) {
     container.innerHTML = content;
 
     const collects = container.querySelectorAll<HTMLButtonElement>("#collect")!;
-    collects.forEach((collect) => {
+    collects.forEach((collect, index) => {
       collect.addEventListener("click", () => {
-        let value = Number(momentos.get(point));
-        if (value > 0) {
-          value--;
-          points++;
-        }
-        container.querySelector<HTMLSpanElement>("#value")!.innerHTML =
-          value.toString();
+        const curValue = localStorage.getItem(cachePoint)?.split(",");
 
-        statusPanel.innerHTML = `${points} points accumulated`;
+        if (curValue && curValue.length > index) {
+          const [x, y, serial] = curValue[index].split("#").map(Number);
+
+          playerCoins.push({ coord: { x, y }, serial });
+          localStorage.setItem(
+            `player`,
+            (localStorage.getItem(`player`) || "") + curValue[index] + ","
+          );
+
+          curValue.splice(index, 1);
+          container.querySelector<HTMLSpanElement>("#value")!.innerHTML =
+            curValue.length.toString();
+          statusPanel.innerHTML = `${playerCoins.length} points accumulated`;
+
+          localStorage.setItem(JSON.stringify(point), curValue.join(","));
+          cacheList.get(key)?.fromMomento(curValue.join(","));
+          messageChange(curValue.length, curValue);
+        }
       });
     });
     const deposit = container.querySelector<HTMLButtonElement>("#deposit")!;
     deposit.addEventListener("click", () => {
-      let value = Number(momentos.get(point));
-      if (points > 0) {
-        value++;
-        points--;
-      }
+      const curValue = localStorage.getItem(cachePoint)?.split(",");
+      const chosenCoin = playerCoins[playerCoins.length - 1];
+      const temp = `${chosenCoin.coord.x}#${chosenCoin.coord.y}#${chosenCoin.serial}`;
+      curValue?.push(temp);
+      playerCoins.splice(playerCoins.length - 1, 1);
+
       container.querySelector<HTMLSpanElement>("#value")!.innerHTML =
-        value.toString();
-      statusPanel.innerHTML = `${points} points accumulated`;
+        curValue!.length.toString();
+      if (playerCoins.length == 0) {
+        statusPanel.innerHTML = `No points accumulated`;
+      } else {
+        statusPanel.innerHTML = `${playerCoins.length} points accumulated`;
+      }
+      //momentos.set(point, curValue.toString());
+      localStorage.setItem(JSON.stringify(point), curValue!.join(","));
+      cacheList.get(key)?.fromMomento(curValue!.join(","));
+      messageChange(
+        localStorage.getItem(cachePoint)!.split(",").length,
+        curValue!
+      );
     });
     return container;
   });
+
   pit.addTo(map);
 }
+function messageChange(value: number, list: string[]) {
+  const temp = document.getElementById(`scrollableContainer`);
+  let content = ``;
+  for (let iter = 0; iter < value; iter++) {
+    if (list) {
+      content += `<p>${list[iter]}   <button id="collect">collect</button></p>`;
+    }
+  }
+  if (temp) {
+    temp.innerHTML = content;
+  }
+}
 
-for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
-  for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
-    if (Math.random() * 100 <= PIT_SPAWN_PROBABILITY) {
+function pitSpawn() {
+  for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
+    for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
       const lat = playerMarker.getLatLng().lat + i * TILE_DEGREES;
       const lng = playerMarker.getLatLng().lng + j * TILE_DEGREES;
-      makePit(lat, lng);
+      const key = `${lat.toFixed(5)}_${lng.toFixed(5)}`;
+
+      if (
+        Math.random() * 100 <= PIT_SPAWN_PROBABILITY &&
+        !clearedLocations.has(key)
+      ) {
+        makePit(lat, lng);
+      }
+
+      // Add the location to the cleared set, regardless of whether a pit is spawned
+      clearedLocations.add(key);
     }
   }
 }
 
-function updateMap() {
-  console.log("Updating map...");
+pitSpawn();
 
+function updateMap() {
   const playerCell: Cell = currentMap.getGridCell(
     playerMarker.getLatLng().lat,
     playerMarker.getLatLng().lng
@@ -188,6 +279,11 @@ south?.addEventListener("click", () => {
     lat: playerMarker.getLatLng().lat - 0.0001,
     lng: playerMarker.getLatLng().lng,
   });
+  map.setView(playerMarker.getLatLng());
+  movements.push(playerMarker.getLatLng());
+  playerPath = polyline(movements, { color: `blue` }).addTo(map);
+  polylineArray.push(playerPath);
+  pitSpawn();
   updateMap();
 });
 
@@ -196,6 +292,11 @@ north?.addEventListener("click", () => {
     lat: playerMarker.getLatLng().lat + 0.0001,
     lng: playerMarker.getLatLng().lng,
   });
+  map.setView(playerMarker.getLatLng());
+  movements.push(playerMarker.getLatLng());
+  playerPath = polyline(movements, { color: `blue` }).addTo(map);
+  polylineArray.push(playerPath);
+  pitSpawn();
   updateMap();
 });
 
@@ -204,6 +305,11 @@ east?.addEventListener("click", () => {
     lat: playerMarker.getLatLng().lat,
     lng: playerMarker.getLatLng().lng + 0.0001,
   });
+  map.setView(playerMarker.getLatLng());
+  movements.push(playerMarker.getLatLng());
+  playerPath = polyline(movements, { color: `blue` }).addTo(map);
+  polylineArray.push(playerPath);
+  pitSpawn();
   updateMap();
 });
 
@@ -212,5 +318,51 @@ west?.addEventListener("click", () => {
     lat: playerMarker.getLatLng().lat,
     lng: playerMarker.getLatLng().lng - 0.0001,
   });
+  map.setView(playerMarker.getLatLng());
+  movements.push(playerMarker.getLatLng());
+  playerPath = polyline(movements, { color: `blue` }).addTo(map);
+  polylineArray.push(playerPath);
+  pitSpawn();
   updateMap();
+});
+
+liveSensor?.addEventListener("click", () => {
+  navigator.geolocation.watchPosition((position) => {
+    playerMarker.setLatLng(
+      leaflet.latLng(position.coords.latitude, position.coords.longitude)
+    );
+    map.setView(playerMarker.getLatLng());
+    movements.push(playerMarker.getLatLng());
+    playerPath = polyline(movements, { color: `red` }).addTo(map);
+    polylineArray.push(playerPath);
+    pitSpawn();
+    updateMap();
+  }),
+    function error() {
+      alert(`Please enable your GPS position feature.`);
+    },
+    { maximumAge: 10000, timeout: 5000, enableHighAccuracy: true };
+});
+
+reset?.addEventListener("click", () => {
+  //return back to spawn
+  movements = [];
+  polylineArray.forEach((line) => {
+    line.remove();
+  });
+  polylineArray = [];
+  playerMarker.setLatLng(MERRILL_CLASSROOM);
+  map.setView(playerMarker.getLatLng());
+  currentMap.clearBoard(); //clear the board
+  cacheList.clear(); //clear all cache in the list
+  cacheMap.forEach((cache) => {
+    cache[0].remove();
+  });
+  cacheMap.clear();
+  localStorage.clear();
+  clearedLocations.clear();
+  pitSpawn();
+  localStorage.setItem("player", ``);
+  playerCoins = [];
+  statusPanel.innerHTML = "No points yet..."; //reset the points
 });
